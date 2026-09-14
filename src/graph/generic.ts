@@ -497,7 +497,7 @@ function extractElixir(root: TsNode, rel: string, nodes: NodeV1[], defs: Def[], 
       const head = headOf(n);
       const args = argsOf(n);
       const firstArg = args ? (kids(args)[0] ?? null) : null;
-      if (head === "defmodule" && firstArg?.type === "alias") {
+      if ((head === "defmodule" || head === "defprotocol") && firstArg?.type === "alias") {
         // `alias Shop.Payments` … `defmodule Payments.Gateway` defines Shop.Payments.Gateway:
         // defmodule expands aliases in scope exactly like a remote call does.
         const name = expand(firstArg.text);
@@ -512,6 +512,28 @@ function extractElixir(root: TsNode, rel: string, nodes: NodeV1[], defs: Def[], 
         for (const c of kids(n)) visit(c);
         scopes.pop();
         return;
+      }
+      if (head === "defimpl" && firstArg?.type === "alias" && args) {
+        const protocol = expand(firstArg.text);
+        const kw = kids(args).find((c) => c.type === "keywords");
+        const forPair = kw && kids(kw).find((pair) => kids(pair)[0]?.text.trim() === "for:");
+        const targetNode = forPair && kids(forPair)[1];
+        if (targetNode?.type === "alias") {
+          const target = expand(targetNode.text);
+          const md = defByStart.get(n.startIndex);
+          const impl = md ? nodeById.get(md.id) : undefined;
+          if (impl) {
+            const fqn = `${protocol}.${target}`;
+            impl.name = fqn;
+            impl.fqn = fqn;
+            rawEdges.push({ source: impl.id, relation: "implements", file: rel, name: protocol });
+            rawEdges.push({ source: impl.id, relation: "references", file: rel, name: target });
+            scopes.push({ fqn, aliases: new Map() });
+            for (const c of kids(n)) visit(c);
+            scopes.pop();
+            return;
+          }
+        }
       }
       if (head === "alias" && args) {
         recordAlias(args);
@@ -532,19 +554,25 @@ function extractElixir(root: TsNode, rel: string, nodes: NodeV1[], defs: Def[], 
         const l = field(t, "left"), r = field(t, "right");
         const recv = l && r?.type === "identifier" ? receiverOf(l) : null;
         if (recv && r) {
-          let argCount = args ? kids(args).length : 0;
-          const p = n.parent;
-          const op = p?.type === "binary_operator" ? opOf(p) : null;
-          const rhs = op ? field(p, "right") : null;
-          // `&Mod.fun/2`: no call args, the arity is the `/ N` operand.
-          if (args && argCount === 0 && op === "/" && rhs?.type === "integer") argCount = Number(rhs.text);
-          // `x |> Mod.fun(a)` supplies one more argument than written.
-          if (op === "|>" && rhs?.startIndex === n.startIndex) argCount += 1;
           const enc = enclosing(r.startIndex);
-          rawEdges.push({
-            source: enc ? enc.id : rel, relation: "calls", file: rel, name: r.text,
-            viaMember: true, recvType: recv, argCount,
-          });
+          if (isElixirTypeAttribute(n)) {
+            rawEdges.push({
+              source: enc ? enc.id : rel, relation: "references", file: rel, name: recv,
+            });
+          } else {
+            let argCount = args ? kids(args).length : 0;
+            const p = n.parent;
+            const op = p?.type === "binary_operator" ? opOf(p) : null;
+            const rhs = op ? field(p, "right") : null;
+            // `&Mod.fun/2`: no call args, the arity is the `/ N` operand.
+            if (args && argCount === 0 && op === "/" && rhs?.type === "integer") argCount = Number(rhs.text);
+            // `x |> Mod.fun(a)` supplies one more argument than written.
+            if (op === "|>" && rhs?.startIndex === n.startIndex) argCount += 1;
+            rawEdges.push({
+              source: enc ? enc.id : rel, relation: "calls", file: rel, name: r.text,
+              viaMember: true, recvType: recv, argCount,
+            });
+          }
         }
       }
     }
@@ -581,9 +609,13 @@ function tagsExtract(
       mkDef(cap.name.text, KIND[defKey.slice("definition.".length)] ?? "function", defScope(cap[defKey], langName));
     }
     if (("reference.call" in cap || "reference.send" in cap) && cap.name) {
-      // Elixir remote call (`Mod.fun`): the bare `fun` is ambiguous repo-wide by
-      // construction; extractElixir re-emits it receiver-typed instead.
-      if (!(langName === "elixir" && cap.name.parent?.type === "dot"))
+      // Elixir remote calls are re-emitted receiver-typed by extractElixir. Calls
+      // anywhere in a type attribute are references, including the local-looking
+      // function head in `@spec run(...)`.
+      if (
+        !(langName === "elixir" && cap.name.parent?.type === "dot") &&
+        !(langName === "elixir" && isElixirTypeAttribute(cap.name))
+      )
         calls.push({ name: cap.name.text, at: cap.name.startIndex });
     }
     // Structural references the grammar already marks: a supertype (extends), an
@@ -681,6 +713,26 @@ export interface TsNode {
   namedChildCount?: number;
   namedChild?(i: number): TsNode | null;
   childForFieldName?(field: string): TsNode | null;
+}
+
+const ELIXIR_TYPE_ATTRIBUTES = new Set([
+  "spec", "type", "typep", "opaque", "callback", "macrocallback",
+]);
+
+/** Whether an Elixir node is inside a type-system module attribute. The grammar
+ * represents `@spec` as unary_operator → call(target: `spec`), so calls such as
+ * `Result.t()` otherwise look indistinguishable from runtime remote calls. */
+function isElixirTypeAttribute(node: TsNode): boolean {
+  let current: TsNode | null = node;
+  while (current) {
+    if (current.type === "unary_operator" && current.text.trimStart().startsWith("@")) {
+      const operand = current.namedChild?.(0);
+      const target = operand?.type === "call" ? operand.childForFieldName?.("target") : null;
+      return target?.type === "identifier" && ELIXIR_TYPE_ATTRIBUTES.has(target.text);
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 // Some grammars' tags.scm put @definition.<X> on a narrow node (C tags the

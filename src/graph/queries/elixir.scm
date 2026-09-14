@@ -4,7 +4,7 @@
 (call
   target: (identifier) @ignore
   (arguments (alias) @name)
-  (#any-of? @ignore "defmodule" "defprotocol")) @definition.module
+  (#any-of? @ignore "defmodule" "defprotocol" "defimpl")) @definition.module
 
 ; * functions/macros
 (call

@@ -11,9 +11,13 @@
   pass now emits the call receiver-typed (`alias A.B.C`, `as:`, `alias A.{B, C}`,
   `__MODULE__`, nested-module auto-aliases, `defmodule` under an aliased prefix,
   `&Mod.fun/N`, pipes), stamps defs with their module and arity, and resolves through the
-  existing owner-qualified index. A bare `foo()` in Elixir is same-file only; a call to a
-  macro-generated function (`use Ecto.Repo`) lands on the module node instead of vanishing;
-  multi-clause heads collapse to one target. Measured on a 219-file app against
+  existing owner-qualified index. Qualified `Module.fun` and `Module.fun/arity` queries now
+  use that metadata instead of falling back to every same-named function. A bare `foo()` in
+  Elixir is same-file only; a call to a macro-generated function (`use Ecto.Repo`) lands on
+  the module node instead of vanishing; multi-clause heads collapse to one target. Calls in
+  type attributes (`@spec`, `@type`, callbacks) are module references rather than runtime
+  calls, and `defimpl` nodes link to both their protocol and implemented-for module. Measured
+  on a 219-file app against
   `mix xref graph`: cross-file call-edge precision 0.38 → 0.93, recall 0.41 → 0.64.
 
 ## 0.18.0

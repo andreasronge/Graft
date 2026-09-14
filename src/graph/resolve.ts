@@ -229,6 +229,13 @@ export function resolveEdges(
                   : resolveImport(e.specifier, e.file, byId);
       add(e.source, target, "imports", "extracted");
     } else if (e.relation === "extends" || e.relation === "implements") {
+      // Elixir protocols are module nodes. `defimpl Protocol, for: Type` emits
+      // an implements edge to the compiler-qualified protocol name.
+      const elixirModule = EX_EXT.test(e.file) && e.name ? moduleByFqn.get(e.name) : undefined;
+      if (elixirModule) {
+        add(e.source, elixirModule.id, e.relation, "extracted");
+        continue;
+      }
       // `implements` also resolves to a `trait` — PHP models trait composition
       // (`use SomeTrait;`) as an implements edge, and a trait is a valid target.
       const kinds: Kind[] = e.relation === "implements" ? ["interface", "trait"] : ["class", "interface"];
@@ -267,6 +274,11 @@ export function resolveEdges(
         if (hit && hit.id !== e.source && anno?.signature?.includes("@interface"))
           add(e.source, hit.id, "references", hit.confidence);
         else add(e.source, e.name, "references", "inferred");
+      } else if (EX_EXT.test(e.file) && moduleByFqn.has(e.name)) {
+        // Elixir's binding pass emits compiler-qualified module references from
+        // typespecs and `defimpl ... for:` targets.
+        const module = moduleByFqn.get(e.name)!;
+        if (module.id !== e.source) add(e.source, module.id, "references", "extracted");
       } else if (byId.get(e.source)?.origin === "generic") {
         // Breadth tier: a bare-name structural reference (extends / implements /
         // object-creation / module alias) the grammar marked but cannot type. Resolve

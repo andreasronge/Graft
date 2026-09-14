@@ -80,6 +80,47 @@ test("resolveSymbol: qualified Class.method resolves via id suffix", () => {
   assert.deepEqual(matches.map((n) => n.id), ["src/cache.ts#Cache.get"]);
 });
 
+test("resolveSymbol: Elixir owner and arity metadata resolve a qualified function precisely", () => {
+  const cartTotal = nodeStub({
+    id: "lib/cart.ex#total",
+    name: "total",
+    owner: "Shop.Cart",
+    arity: 1,
+    path: "lib/cart.ex",
+  });
+  const cartTotalClause = nodeStub({
+    id: "lib/cart.ex#total~2",
+    name: "total",
+    owner: "Shop.Cart",
+    arity: 1,
+    path: "lib/cart.ex",
+  });
+  const mailerTotal = nodeStub({
+    id: "lib/mailer.ex#total",
+    name: "total",
+    owner: "Shop.Mailer",
+    arity: 2,
+    path: "lib/mailer.ex",
+  });
+  const g = graphOf([cartTotal, cartTotalClause, mailerTotal], []);
+
+  assert.deepEqual(resolveSymbol(g, "Shop.Cart.total").map((n) => n.id), ["lib/cart.ex#total"]);
+  assert.deepEqual(resolveSymbol(g, "Shop.Mailer.total/2").map((n) => n.id), ["lib/mailer.ex#total"]);
+});
+
+test("resolveSymbol: Elixir modules resolve by compiler-qualified fqn metadata", () => {
+  const implementation = nodeStub({
+    id: "lib/item_renderable.ex#Shop.Renderable",
+    name: "Shop.Renderable",
+    kind: "module",
+    fqn: "Shop.Renderable.Shop.Item",
+    path: "lib/item_renderable.ex",
+  });
+  const g = graphOf([implementation], []);
+
+  assert.deepEqual(resolveSymbol(g, "Shop.Renderable.Shop.Item").map((n) => n.id), [implementation.id]);
+});
+
 test("resolveSymbol: last-segment fallback for a dotted package-qualified name", () => {
   const g = baseGraph();
   // "hashstructure.Hash" has no id-suffix match anywhere in the fixture — falls

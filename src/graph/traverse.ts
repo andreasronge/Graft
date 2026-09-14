@@ -58,7 +58,8 @@ export function resolveSymbol(graph: GraphV1, query: string, opts: ResolveSymbol
   const lowerQuery = query.toLowerCase();
   const looksLikeFilename = query.includes(".") && !query.includes("#");
 
-  let matches = symbolMatches(graph.nodes, lowerQuery);
+  let matches = metadataMatches(graph.nodes, lowerQuery);
+  if (matches.length === 0) matches = symbolMatches(graph.nodes, lowerQuery);
 
   if (matches.length === 0 && query.includes(".")) {
     const lastSegment = query.slice(query.lastIndexOf(".") + 1).toLowerCase();
@@ -96,6 +97,32 @@ export function resolveSymbol(graph: GraphV1, query: string, opts: ResolveSymbol
  * string), not just the very end of the string. */
 function stripOrdinals(idTail: string): string {
   return idTail.replace(/~\d+(?=\.|$)/g, "");
+}
+
+/** Match identities that cannot be encoded in legacy path-scoped node ids.
+ * Elixir's breadth extractor stores module ownership/arity on functions and the
+ * compiler-qualified name on modules (notably generated defimpl modules). */
+function metadataMatches(nodes: NodeV1[], lowerQuery: string): NodeV1[] {
+  const arityMatch = lowerQuery.match(/\/(\d+)$/);
+  const wantedArity = arityMatch ? Number(arityMatch[1]) : undefined;
+  const base = arityMatch ? lowerQuery.slice(0, arityMatch.index) : lowerQuery;
+  const matches = nodes.filter((n) => {
+    if (n.kind === "file") return false;
+    if (n.fqn?.toLowerCase() === base) return wantedArity === undefined;
+    if (!n.owner || `${n.owner}.${n.name}`.toLowerCase() !== base) return false;
+    return wantedArity === undefined || n.arity === wantedArity;
+  });
+
+  // Elixir emits one node per source clause. A qualified function identity names
+  // the logical function, so keep its first clause just as call resolution does.
+  const seenElixir = new Set<string>();
+  return matches.filter((n) => {
+    if (!/\.exs?$/i.test(n.path) || !n.owner) return true;
+    const key = `${n.owner}\0${n.name}\0${n.arity ?? "?"}`;
+    if (seenElixir.has(key)) return false;
+    seenElixir.add(key);
+    return true;
+  });
 }
 
 function symbolMatches(nodes: NodeV1[], lowerQuery: string): NodeV1[] {

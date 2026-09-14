@@ -89,6 +89,37 @@ const OTHER = `defmodule Shop.Util do
 end
 `;
 
+const TYPES = `defmodule Shop.Left do
+  def t, do: :not_a_typespec_call
+end
+
+defmodule Shop.Right do
+  def t, do: :not_a_typespec_call
+end
+
+defmodule Shop.TypeClient do
+  alias Shop.{Left, Right}
+
+  @spec convert(Left.t()) :: Right.t()
+  def convert(value), do: value
+end
+`;
+
+const PROTOCOL = `defprotocol Shop.Renderable do
+  def render(value)
+end
+`;
+
+const ITEM = `defmodule Shop.Item do
+  defstruct [:name]
+end
+`;
+
+const IMPLEMENTATION = `defimpl Shop.Renderable, for: Shop.Item do
+  def render(item), do: item.name
+end
+`;
+
 function makeFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "graft-elixir-"));
   writeFileSync(
@@ -106,6 +137,10 @@ function makeFixture(): string {
   writeFileSync(join(dir, "lib/shop/repo.ex"), REPO);
   writeFileSync(join(dir, "lib/shop/accounts.ex"), ACCOUNTS);
   writeFileSync(join(dir, "lib/shop/util.ex"), OTHER);
+  writeFileSync(join(dir, "lib/shop/types.ex"), TYPES);
+  writeFileSync(join(dir, "lib/shop/renderable.ex"), PROTOCOL);
+  writeFileSync(join(dir, "lib/shop/item.ex"), ITEM);
+  writeFileSync(join(dir, "lib/shop/item_renderable.ex"), IMPLEMENTATION);
   return dir;
 }
 
@@ -172,6 +207,60 @@ test("Elixir: bare calls stay local; macro-generated targets fall back to the mo
     // `Repo.get_by(...)` — Shop.Repo declares no def; the edge lands on the module node.
     assert.deepEqual(calls(g, "lib/shop/accounts.ex#owner"), ["lib/shop/repo.ex#Shop.Repo"]);
     assert.equal(g.edges.find((e) => e.source === "lib/shop/accounts.ex#owner")?.confidence, "inferred");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Elixir: typespec remote types are references, never calls to t/0", async () => {
+  const dir = makeFixture();
+  try {
+    await buildGraph(dir);
+    const g = readGraph(wiringPath(join(dir, "graft")))!;
+    const source = "lib/shop/types.ex#Shop.TypeClient";
+
+    assert.deepEqual(calls(g, source), [], "Left.t/0 and Right.t/0 are types, not runtime calls");
+    assert.deepEqual(
+      g.edges
+        .filter((e) => e.source === source && e.relation === "references")
+        .map((e) => e.target)
+        .filter((id) => id.endsWith("#Shop.Left") || id.endsWith("#Shop.Right"))
+        .sort(),
+      ["lib/shop/types.ex#Shop.Left", "lib/shop/types.ex#Shop.Right"],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Elixir: defimpl owns its functions and links the protocol and target module", async () => {
+  const dir = makeFixture();
+  try {
+    await buildGraph(dir);
+    const g = readGraph(wiringPath(join(dir, "graft")))!;
+    const impl = g.nodes.find((n) => n.fqn === "Shop.Renderable.Shop.Item");
+
+    assert.ok(impl, "defimpl should produce an addressable implementation module");
+    assert.equal(
+      g.nodes.find((n) => n.path === "lib/shop/item_renderable.ex" && n.name === "render")?.owner,
+      "Shop.Renderable.Shop.Item",
+    );
+    assert.ok(
+      g.edges.some(
+        (e) =>
+          e.source === impl.id &&
+          e.relation === "implements" &&
+          e.target === "lib/shop/renderable.ex#Shop.Renderable",
+      ),
+    );
+    assert.ok(
+      g.edges.some(
+        (e) =>
+          e.source === impl.id &&
+          e.relation === "references" &&
+          e.target === "lib/shop/item.ex#Shop.Item",
+      ),
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
