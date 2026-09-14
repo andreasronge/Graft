@@ -121,6 +121,18 @@ export const HOSTS: HostTarget[] = [
     content: windsurfRule,
     detect: (p) => p.dirExists(join(p.home, '.codeium', 'windsurf')) || p.dirExists(join(p.repo, '.windsurf')),
   },
+  {
+    id: 'pi',
+    name: 'Pi Coding Agent',
+    kind: 'owned',
+    relPath: join('.pi', 'skills', 'graft', 'SKILL.md'),
+    content: skillTemplate,
+    // Pi auto-discovers trusted project skills under .pi/skills/. Its global
+    // install marker is ~/.pi/agent; a project may already carry a .pi dir.
+    detect: (p) =>
+      p.dirExists(join(p.home, '.pi', 'agent')) ||
+      p.dirExists(join(p.repo, '.pi')),
+  },
 ];
 
 export function hostIds(): string[] {

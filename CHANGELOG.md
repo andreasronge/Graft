@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- **Pi host integration** installs Graft's project skill at
+  `.pi/skills/graft/SKILL.md`, detected from `~/.pi/agent` or a project `.pi`
+  directory. Pi uses the Graft CLI because core Pi has no MCP client.
+
 ### Fixed
 
 - **Elixir remote calls resolve through `alias`** (#351) in the generic tree-sitter tier, so

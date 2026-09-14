@@ -15,7 +15,7 @@ function probeFor(home: string, repo: string): DetectProbe {
 function fresh(): string { return mkdtempSync(join(tmpdir(), 'graft-registry-')); }
 
 test('registry exposes the known hosts', () => {
-  assert.deepEqual(hostIds().sort(), ['adal', 'agents', 'antigravity', 'copilot', 'cursor', 'gemini', 'grok', 'hermes', 'kiro', 'windsurf']);
+  assert.deepEqual(hostIds().sort(), ['adal', 'agents', 'antigravity', 'copilot', 'cursor', 'gemini', 'grok', 'hermes', 'kiro', 'pi', 'windsurf']);
   for (const h of HOSTS) {
     assert.ok(h.relPath.length > 0);
     assert.ok(h.content().length > 0);
@@ -55,6 +55,20 @@ test('repo-local .adal also lights up the adal host', () => {
   mkdirSync(join(repo, '.adal'));
   const ids = detectHosts(probeFor(home, repo)).map((h) => h.id).sort();
   assert.deepEqual(ids, ['adal']);
+});
+
+test('~/.pi/agent lights up the pi host', () => {
+  const home = fresh(); const repo = fresh();
+  mkdirSync(join(home, '.pi', 'agent'), { recursive: true });
+  const ids = detectHosts(probeFor(home, repo)).map((h) => h.id).sort();
+  assert.deepEqual(ids, ['pi']);
+});
+
+test('repo-local .pi also lights up the pi host', () => {
+  const home = fresh(); const repo = fresh();
+  mkdirSync(join(repo, '.pi'));
+  const ids = detectHosts(probeFor(home, repo)).map((h) => h.id).sort();
+  assert.deepEqual(ids, ['pi']);
 });
 
 test('~/.grok lights up the grok host', () => {

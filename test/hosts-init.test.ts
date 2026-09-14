@@ -34,7 +34,7 @@ test('explicit agents list overrides detection and flags unknown ids', () => {
 test('all writes every host and re-run converges (idempotent)', () => {
   const home = fresh(); const repo = fresh();
   const first = runHostsInit(repo, { home, all: true });
-  assert.equal(first.written.length, 10);
+  assert.equal(first.written.length, 11);
   const second = runHostsInit(repo, { home, all: true });
   assert.ok(second.written.every((w) => w.action === 'unchanged'));
   // `agents` and `antigravity` share AGENTS.md, but the fenced section is written once
@@ -52,6 +52,15 @@ test('preserves user content around the fenced section', () => {
   const text = readFileSync(target, 'utf8');
   assert.ok(text.startsWith('# House rules'));
   assert.ok(text.includes('graft ask'));
+});
+
+test('CLI: graft init --agents pi writes a Pi-discoverable project skill', () => {
+  const home = fresh(); const repo = fresh();
+  const result = runCli(['init', repo, '--no-build', '--agents', 'pi'], { home });
+  assert.equal(result.status, 0, result.describe());
+  const skill = readFileSync(join(repo, '.pi', 'skills', 'graft', 'SKILL.md'), 'utf8');
+  assert.match(skill, /^---\nname: graft\ndescription:/);
+  assert.ok(skill.includes('graft callers'));
 });
 
 test('CLI: graft init --agents gemini writes GEMINI.md and exits 0', () => {
